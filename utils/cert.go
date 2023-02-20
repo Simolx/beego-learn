@@ -6,10 +6,16 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
+	"path/filepath"
 	"time"
+)
+
+const (
+	certVersionV3 = 3
 )
 
 type CertConfig struct {
@@ -19,9 +25,28 @@ type CertConfig struct {
 	CaCert         string
 }
 
-const (
-	certVersionV3 = 3
-)
+type CertInfo struct {
+	CertName    string
+	Subject     pkix.Name
+	IpAddresses []net.IP
+	DnsNames    []string
+	Location    string
+	ServerCerts []*CertInfo
+}
+
+func (c *CertInfo) SignCerts() {
+	caCertBlockBytes, caRsaPrivateKeyBytes := SignCACert(c.Subject, c.IpAddresses, c.DnsNames)
+	WriteFile(filepath.Join(c.Location, fmt.Sprintf("%s.crt", c.CertName)), caCertBlockBytes)
+	WriteFile(filepath.Join(c.Location, fmt.Sprintf("%s.key", c.CertName)), caRsaPrivateKeyBytes)
+	for i := 0; i < len(c.ServerCerts); i++ {
+		serverCertInfo := c.ServerCerts[i]
+		serverCertBlockBytes, serverRsaPrivateKeyBytes := SignServerCert(
+			serverCertInfo.Subject, serverCertInfo.IpAddresses, serverCertInfo.DnsNames,
+			caCertBlockBytes, caRsaPrivateKeyBytes)
+		WriteFile(filepath.Join(serverCertInfo.Location, fmt.Sprintf("%s.crt", serverCertInfo.CertName)), serverCertBlockBytes)
+		WriteFile(filepath.Join(serverCertInfo.Location, fmt.Sprintf("%s.key", serverCertInfo.CertName)), serverRsaPrivateKeyBytes)
+	}
+}
 
 func generatePrivateKey() (*rsa.PrivateKey, []byte, error) {
 	priKey4096 := 4096
@@ -30,11 +55,7 @@ func generatePrivateKey() (*rsa.PrivateKey, []byte, error) {
 		log.Printf("generate key failed, %v", err)
 		return nil, nil, err
 	}
-	pkcsPrivateKey, err := x509.MarshalPKCS8PrivateKey(rsaPrivateKey)
-	if err != nil {
-		log.Printf("create private key failed, error %v", err)
-		return nil, nil, err
-	}
+	pkcsPrivateKey := x509.MarshalPKCS1PrivateKey(rsaPrivateKey)
 	privateBlock := pem.Block{Type: "RSA PRIVATE KEY", Bytes: pkcsPrivateKey}
 	return rsaPrivateKey, pem.EncodeToMemory(&privateBlock), nil
 }
@@ -74,10 +95,10 @@ func SignCACert(pkixName pkix.Name, ipAddresses []net.IP, dnsNames []string) ([]
 		// IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
 	}
 
-	if ipAddresses != nil {
+	if len(ipAddresses) > 0 {
 		template.IPAddresses = ipAddresses
 	}
-	if dnsNames != nil {
+	if len(dnsNames) > 0 {
 		template.DNSNames = dnsNames
 	}
 	caCertByte, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
@@ -143,11 +164,15 @@ func SignServerCert(pkixName pkix.Name, ipAddress []net.IP, dnsNames []string, c
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageContentCommitment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		SignatureAlgorithm:    csr.SignatureAlgorithm,
-		IPAddresses:           csr.IPAddresses,
-		DNSNames:              csr.DNSNames,
+	}
+	if len(csr.IPAddresses) > 0 {
+		serverCert.IPAddresses = csr.IPAddresses
+	}
+	if len(csr.DNSNames) > 0 {
+		serverCert.DNSNames = csr.DNSNames
 	}
 	caPrivateKyeBlock, _ := pem.Decode(caPrivateKeyBlockBytes)
-	caPrivateKey, err := x509.ParsePKCS8PrivateKey(caPrivateKyeBlock.Bytes)
+	caPrivateKey, err := x509.ParsePKCS1PrivateKey(caPrivateKyeBlock.Bytes)
 	if err != nil {
 		log.Fatalf("parser private key failed in sign server cert, %v", err)
 	}
