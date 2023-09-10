@@ -55,7 +55,8 @@ func generatePrivateKey() (*rsa.PrivateKey, []byte, error) {
 		log.Printf("generate key failed, %v", err)
 		return nil, nil, err
 	}
-	pkcsPrivateKey := x509.MarshalPKCS1PrivateKey(rsaPrivateKey)
+	// pkcsPrivateKey := x509.MarshalPKCS1PrivateKey(rsaPrivateKey)
+	pkcsPrivateKey, _ := x509.MarshalPKCS8PrivateKey(rsaPrivateKey)
 	privateBlock := pem.Block{Type: "RSA PRIVATE KEY", Bytes: pkcsPrivateKey}
 	return rsaPrivateKey, pem.EncodeToMemory(&privateBlock), nil
 }
@@ -172,7 +173,8 @@ func SignServerCert(pkixName pkix.Name, ipAddress []net.IP, dnsNames []string, c
 		serverCert.DNSNames = csr.DNSNames
 	}
 	caPrivateKyeBlock, _ := pem.Decode(caPrivateKeyBlockBytes)
-	caPrivateKey, err := x509.ParsePKCS1PrivateKey(caPrivateKyeBlock.Bytes)
+	// caPrivateKey, err := x509.ParsePKCS1PrivateKey(caPrivateKyeBlock.Bytes)
+	caPrivateKey, err := x509.ParsePKCS8PrivateKey(caPrivateKyeBlock.Bytes)
 	if err != nil {
 		log.Fatalf("parser private key failed in sign server cert, %v", err)
 	}

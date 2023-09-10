@@ -1,10 +1,13 @@
 package main
 
 import (
-	"example.com/lx/beego/dev/utils"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+
+	"example.com/lx/beego/dev/utils"
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
@@ -45,6 +48,50 @@ func (c ServerController) StopServer() {
 		return
 	}
 	c.Ctx.Output.Body([]byte(`{"result": "stop zk succeed"}`))
+}
+
+func (c ServerController) BenchMarkUnMarshal() {
+	var requestBody map[string]string
+	var data map[string]interface{}
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &requestBody); err != nil {
+		logger.Error("Unmarshal request body failed, error: %v", err)
+		c.Ctx.Output.Body([]byte(`{"result": "get request body failed"}`))
+	} else if content, err := os.ReadFile(requestBody["path"]); err != nil {
+		logger.Error("read file %s failed, err %v", requestBody["path"], err)
+		c.Ctx.Output.Body([]byte(`{"result": "read file failed"}`))
+	} else if err := json.Unmarshal(content, &data); err != nil {
+		logger.Error("Unmarshal file content failed, error: %v", err)
+		c.Ctx.Output.Body([]byte(`{"result": "unmarshal file content failed"}`))
+	} else {
+		logger.Info("there are %d items in file", len(data))
+		c.Ctx.Output.Body([]byte(`{"result": "succeed"}`))
+	}
+}
+
+func (c ServerController) BenchMarkTarCmd() {
+	var requestBody map[string]string
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &requestBody); err != nil {
+		logger.Error("Unmarshal request body failed, error: %v", err)
+		c.Ctx.Output.Body([]byte(`{"result": "get request body failed"}`))
+		return
+	}
+	if _, err := os.Stat(requestBody["path"]); err != nil {
+		logger.Error("check file stat failed, error: %v", err)
+		c.Ctx.Output.Body([]byte(`{"result": "file stat error"}`))
+		return
+	}
+	tarParams, ok := requestBody["param"]
+	if !ok {
+		tarParams = "czvf"
+	}
+	cmd := exec.Command("tar", "-"+tarParams, "/tmp/result.tar.gz", "-C", requestBody["path"], ".")
+	if _, err := cmd.CombinedOutput(); err != nil {
+		logger.Error("check file stat failed, error: %v", err)
+		c.Ctx.Output.Body([]byte(`{"result": "file stat error"}`))
+		return
+	}
+	logger.Info("tar %s succeed", tarParams)
+	c.Ctx.Output.Body([]byte(`{"result": "succeed"}`))
 }
 
 func main() {
@@ -111,5 +158,14 @@ func main() {
 			CaCert:     fmt.Sprintf("conf/certs/ca%s.crt", os.Args[2]),
 		}
 		utils.GetRequest(url, certConfig)
+	} else if os.Args[1] == "http" {
+		web.BConfig.Listen.EnableHTTPS = false
+		web.CtrlPost("/check/unmarshal", ServerController.BenchMarkUnMarshal)
+		web.CtrlPost("/check/compress", ServerController.BenchMarkTarCmd)
+		go func() {
+			logger.Info("start pprof result: %v", http.ListenAndServe("localhost:6060", nil))
+		}()
+		logger.Info("server handlers %v", web.PrintTree())
+		web.Run()
 	}
 }
