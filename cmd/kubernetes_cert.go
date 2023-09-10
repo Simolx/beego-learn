@@ -31,7 +31,7 @@ func main() {
 			},
 			IpAddresses: []net.IP{
 				net.ParseIP("10.97.0.1"),
-				net.ParseIP("10.98.66.31"),
+				net.ParseIP("10.98.66.30"),
 			},
 			DnsNames: []string{
 				"controlplane",
